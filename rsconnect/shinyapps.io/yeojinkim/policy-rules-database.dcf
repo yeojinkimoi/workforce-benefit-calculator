@@ -1,0 +1,13 @@
+name: policy-rules-database
+title: policy-rules-database
+username: yeojinkim
+account: yeojinkim
+server: shinyapps.io
+hostUrl: https://api.shinyapps.io/v1
+appId: 16281131
+bundleId: 11343822
+url: https://yeojinkim.shinyapps.io/policy-rules-database/
+version: 1
+asMultiple: FALSE
+asStatic: FALSE
+ignoredFiles: .github/workflows/test.yml|.here|applyBenefitsCalculator.R|CITATION.cff|data/fake_yearup_1000.csv|data/fake_yearup_1000_post.csv|data/fake_yearup_1000_pre.csv|fake_yu_data_generator.R|LICENSE|PRD Technical Manual - 07-12-2024.pdf|projects/TEST.yml|projects/UT_single.yml|projects/UT_single_parent.yaml|PSL_catalog.json|README.md|testing.qmd|testing_functions.qmd|UpdateGitHub.R

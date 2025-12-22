@@ -1,0 +1,969 @@
+---
+title: "testing"
+format: html
+editor: visual
+---
+
+```{r}
+library(pacman)
+p_load(tidyverse, readr, scales, oiplot, tibble, stringr, tidyr, forcats, scales)
+
+set_oi_theme()
+source("functions_oi/run_prd_for_df_functions.R")
+source("functions_oi/run_prd_for_input_functions.R")
+source("functions_oi/nice_table_functions.R")
+
+```
+
+```{r}
+## Setting your working directory----
+current_directory<-getwd()
+
+## Load expense parameters ----
+load(paste0(current_directory,"/prd_parameters/expenses.rdata"))
+
+## Load benfits parameters ----
+load(paste0(current_directory,"/prd_parameters/benefit.parameters.rdata"))
+
+## Load eligible tables of SMI,FPL / crosswalks ----
+load(paste0(current_directory,"/prd_parameters/tables.rdata"))
+
+## Load default parameters for the PRD----
+load(paste0(current_directory,"/prd_parameters/parameters.defaults.rdata"))
+
+# verify that everything is loaded in the console
+
+## Call all the functions----
+
+source(paste0(current_directory,"/libraries.R"), local=TRUE) # Load required packages
+source(paste0(current_directory,"/functions/benefits_functions.R"), local=TRUE) # Benefits calculations
+source(paste0(current_directory,"/functions/expense_functions.R"), local=TRUE) # Expenses calculations
+source(paste0(current_directory,"/functions/BenefitsCalculator_functions.R"), local=TRUE) # Benefits Calculator functions
+source(paste0(current_directory,"/functions/TANF.R"), local=TRUE) # TANF code
+source(paste0(current_directory,"/functions/CCDF.R"), local=TRUE) # CCDF code
+
+# SPECIFY PROJECT----
+PROJECT<-"UT_single_parent"
+DATA_NAME <- "fake_yearup_1000_"
+
+## 1. Settings----
+
+# Load inputs YAML file
+inputs <- read_yaml(paste0(current_directory,"/projects/",PROJECT,".yaml"))
+
+####### testing
+
+# Global settings
+k_ftorpt <- inputs$k_ftorpt 
+schoolagesummercare <- inputs$schoolagesummercare 
+headstart_ftorpt <- inputs$headstart_ftorpt  
+preK_ftorpt <- inputs$preK_ftorpt 
+contelig.headstart <- inputs$contelig.headstart 
+contelig.earlyheadstart <- inputs$contelig.earlyheadstart 
+contelig.ccdf <- inputs$contelig.ccdf 
+USEALICE <- inputs$USEALICE
+budget.ALICE <-inputs$budget.ALICE
+
+# Transfer programs switches
+APPLY_CHILDCARE<-inputs$APPLY_CHILDCARE #Childcare block - Head Start and CCDF
+APPLY_CCDF<-inputs$APPLY_CCDF
+APPLY_HEADSTART<-inputs$APPLY_HEADSTART 
+APPLY_PREK<-inputs$APPLY_PREK 
+APPLY_LIHEAP<-FALSE 
+APPLY_HEALTHCARE<-inputs$APPLY_HEALTHCARE 
+APPLY_MEDICAID_ADULT<-inputs$APPLY_MEDICAID_ADULT 
+APPLY_MEDICAID_CHILD<-inputs$APPLY_MEDICAID_CHILD 
+APPLY_ACA<-inputs$APPLY_ACA 
+APPLY_SECTION8<-inputs$APPLY_SECTION8 
+APPLY_RAP<-inputs$APPLY_RAP 
+APPLY_FRSP<-inputs$APPLY_FRSP  
+APPLY_SNAP<-inputs$APPLY_SNAP 
+APPLY_SLP<-inputs$APPLY_SLP 
+APPLY_WIC<-inputs$APPLY_WIC 
+APPLY_EITC<-inputs$APPLY_EITC 
+APPLY_TAXES<-inputs$APPLY_TAXES 
+APPLY_CTC<-inputs$APPLY_CTC
+APPLY_CDCTC<-inputs$APPLY_CDCTC 
+APPLY_FATES<-inputs$APPLY_FATES 
+APPLY_TANF<-inputs$APPLY_TANF 
+APPLY_SSI<-inputs$APPLY_SSI 
+APPLY_SSDI<-inputs$APPLY_SSDI
+
+fake_pre <- read_csv(file.path("data", "fake_yearup_1000_pre.csv"))
+
+## 1) Medicaid FMAP – Utah FY 2024
+## MACPAC / CRS tables imply Utah's regular FMAP is 65.90% in FY 2024
+FMAP_UT_2024 <- 0.6590   # federal share of traditional Medicaid service costs
+
+## 2) CCDF matching rate – Utah FFY 2024
+## ACF “FFY 2023 and FFY 2024 CCDF State Matching Rates” lists Utah’s match ≈ 0.6840
+CCDF_MATCH_UT_2024 <- 0.6840   # federal share for CCDF matching funds
+
+## 3) TANF – effective state vs federal shares
+## Utah TANF note: $75.4m federal TANF block grant, ~$24.9m required state MOE.:contentReference[oaicite:0]{index=0}
+TANF_FED_UT  <- 75.4   # millions, federal TANF grant
+TANF_MOE_UT  <- 24.9   # millions, state MOE
+
+TANF_STATE_SHARE_UT   <- TANF_MOE_UT / (TANF_FED_UT + TANF_MOE_UT)   # ≈ 0.248
+TANF_FEDERAL_SHARE_UT <- TANF_FED_UT  / (TANF_FED_UT + TANF_MOE_UT)  # ≈ 0.752
+
+funding_shares <- tribble(
+  ~component,      ~state_share,                 ~federal_share,
+
+  # Mixed programs (Utah-specific splits)
+  "medicaid_adult",    1 - FMAP_UT_2024,             FMAP_UT_2024,        # ≈ 34.1% state / 65.9% federal
+  "medicaid_child",    1 - FMAP_UT_2024,             FMAP_UT_2024,        # ≈ 34.1% state / 65.9% federal
+  "snap",        0.00,                         1.00,                # benefits treated as fully federal
+  "aca",         0.00,                         1.00,                # ACA PTCs are federal
+  "ccdf",        1 - CCDF_MATCH_UT_2024,       CCDF_MATCH_UT_2024,  # ≈ 31.6% state / 68.4% federal
+  "wic",         0.00,                         1.00,                # WIC benefits fully federal
+
+  # Credits/taxes that are purely federal or purely state
+  "eitc_fed",    0.00,                         1.00,
+  "eitc_state",  1.00,                         0.00,
+  "ctc_fed",     0.00,                         1.00,
+  "ctc_state",   1.00,                         0.00,
+  "tax_income_fed",     0.00,                         1.00,
+  "tax_income_state",   1.00,                         0.00,
+
+  # TANF – effective split based on UT’s TANF grant + MOE
+  "tanf",        TANF_STATE_SHARE_UT,          TANF_FEDERAL_SHARE_UT
+)
+
+funding_shares <- funding_shares %>% 
+  mutate(
+    stateAbbrev = "UT",
+    countyortownName = "Salt Lake County"
+  )
+
+## 3. Choose average treatment effect (ATE) ------------------------------
+
+avg_te <- 7000   # e.g. program raises annual earnings by $7,000 on average
+rule_year <- 2024
+
+
+## 4. Run PRD at pre & post and compute fiscal effects -------------------
+
+res <- compute_fiscal_effect_df(
+  df_pre        = fake_pre,
+  avg_te        = avg_te,
+  ruleYear      = rule_year,
+  data_name     = "fake_yearup_1000",  # optional: will save CSVs
+  funding_shares = funding_shares
+)
+
+# res is a list with:
+#   res$delta_by_government
+#   res$delta_by_component
+#   res$long_raw
+#   res$pre_res
+#   res$post_res
+
+# single input version
+
+state_abbrev    <- "UT"
+county_name     <- "Salt Lake County"
+avg_pre_earn    <- 18000      # avg pre-program earnings
+avg_age         <- 25         # avg age
+n_participants  <- 1000       # total program participants
+avg_te          <- 7000       # avg treatment effect on earnings
+rule_year       <- 2024
+
+# 1-row dataframe: single, no kids, in given county/state
+res_simple <- compute_fiscal_effect_simple(
+  state_abbrev = state_abbrev,
+  county_name  = county_name,
+  avg_pre      = avg_pre_earn,
+  avg_te = avg_te,
+  avg_age      = avg_age,
+  n_participants = 1000,   # still unused, but fine to pass,
+  ruleYear       = 2024,
+  funding_shares
+)
+
+res$delta_by_component
+```
+
+# 1. overall picture
+
+```{r}
+# ---------- Per-participant table ----------
+
+long_raw <- res$long_raw %>% 
+    dplyr::left_join(
+      funding_shares,
+      by = c("component", "stateAbbrev", "countyortownName")
+    )  %>%
+  dplyr::mutate(
+      state_payment   = dollar * state_share,
+      federal_payment = dollar * federal_share
+    ) 
+
+payment_by_component_gov <- long_raw %>% 
+  group_by(period, type, component, component_label) %>%
+  
+  summarize(
+    state_payment_total = sum(state_payment, na.rm=TRUE),
+    federal_payment_total = sum(federal_payment, na.rm=TRUE),
+    .groups="drop"
+  )
+
+# ---------- Per-participant table ----------
+
+payment_by_component_gov %>% 
+  pivot_longer(cols=c(state_payment_total, federal_payment_total), values_to = "dollar", names_to = "gov_type") %>% 
+  
+  mutate(    gov_type = case_when(
+      gov_type == "state_payment_total" ~ "state",
+      gov_type == "federal_payment_total" ~ "federal")) %>% 
+  
+  pivot_wider(id_cols=c(type, component, component_label, gov_type),
+              names_from=period,
+              values_from = dollar) %>% 
+  
+  mutate(
+    diff = case_when(
+      type == "benefit" ~ pre-post,
+      type == "tax" ~ post-pre,
+      TRUE ~ NA_real_
+    )
+  ) %>% 
+  
+  group_by(gov_type, type) %>% 
+  
+  summarize(
+    total_gain = sum(diff, na.rm=TRUE),
+    .groups="drop"
+  ) %>% 
+  
+  pivot_wider(id_cols = "gov_type", names_from = type, values_from = total_gain, names_glue="{type}_{.value}") %>% 
+  
+  mutate(total_gain = benefit_total_gain + tax_total_gain)
+
+# total benefit payments by gov (pre v. post)
+
+payment_by_component_gov %>% 
+  pivot_longer(cols=c(state_payment_total, federal_payment_total), values_to = "dollar", names_to = "gov_type")  %>% 
+    mutate(    gov_type = case_when(
+      gov_type == "state_payment_total" ~ "state",
+      gov_type == "federal_payment_total" ~ "federal")) %>% 
+  
+  filter(type == "benefit") %>% 
+  
+  group_by(period, gov_type) %>% 
+  
+  summarize(
+    total_benefit_spending = sum(dollar, na.rm=TRUE),
+    .groups = "drop"
+  ) %>% 
+
+  pivot_wider(id_cols = c(gov_type), names_from = period, values_from = total_benefit_spending) %>% 
+  
+  mutate(
+    gain = pre-post
+  ) %>% 
+  
+  select(
+    gov_type,  pre, post, gain
+  )
+
+  
+ 
+# total tax revenues by gov (pre v. post)
+ 
+payment_by_component_gov %>% 
+  pivot_longer(cols=c(state_payment_total, federal_payment_total), values_to = "dollar", names_to = "gov_type")  %>% 
+    mutate(    gov_type = case_when(
+      gov_type == "state_payment_total" ~ "state",
+      gov_type == "federal_payment_total" ~ "federal")) %>% 
+  
+  filter(type == "tax") %>% 
+  
+  group_by(period, gov_type) %>% 
+  
+  summarize(
+    total_tax_revenue = sum(dollar, na.rm=TRUE),
+    .groups = "drop"
+  ) %>% 
+
+  pivot_wider(id_cols = "gov_type", names_from = period, values_from = total_tax_revenue) %>% 
+  
+  mutate(
+    gain = post-pre
+  ) %>% 
+  
+  select(
+    gov_type, pre, post, gain
+  )
+
+# visualization
+
+payment_by_component_gov %>% 
+  pivot_longer(cols=c(state_payment_total, federal_payment_total), values_to = "dollar", names_to = "gov_type")  %>% 
+    mutate(    gov_type = case_when(
+      gov_type == "state_payment_total" ~ "state",
+      gov_type == "federal_payment_total" ~ "federal"),
+      
+      type = case_when(
+        type == "benefit" ~ "Benefit Spending",
+        type == "tax" ~ "Tax Revenue"
+      )) %>% 
+
+  group_by(period, gov_type, type) %>% 
+  
+  summarize(
+   dollar = sum(dollar, na.rm=TRUE),
+    .groups = "drop"
+  )  %>% 
+
+  mutate(period = factor(period, levels = c("pre", "post"))) %>% 
+
+    ggplot(
+  aes(
+    x = gov_type,          # <— categories on Y
+    y = dollar/1e6,        # <— values on X (horizontal bars)
+    fill = period
+  )
+) +
+geom_col(position = "dodge", width = 0.4) +
+  facet_grid(.~type) +
+   theme_minimal() +
+  theme(
+    legend.position = "bottom",
+        strip.text.y = element_text(angle = 0),
+      strip.background = element_rect(
+    fill = "#d9eae8",        # background color
+    color = "#d9eae8",        # border color
+    linewidth = 0.8
+  )
+  ) +
+  labs(x=NULL,
+       y="Dollar (millions)") 
+
+# ---------- Component-level breakdown (gains) ----------
+
+idx <- res$delta_by_component %>% 
+  
+  group_by(component_label, type) %>% 
+  
+    summarise(
+    state_gain   = sum(state_gain,  na.rm = TRUE),
+    federal_gain = sum(federal_gain, na.rm = TRUE),
+    total_gain = sum(diff, na.rm=TRUE),
+    .groups = "drop"
+) %>% 
+  
+  mutate(
+    panel = case_when(
+      type == "tax" ~ "A. Tax Revenue",
+      type == "benefit" ~ "B. Benefit Spending"
+    ),
+    panel = factor(panel)
+  ) %>% 
+  count(panel) %>% 
+  tibble::deframe()
+
+
+res$delta_by_component %>%
+      dplyr::select(
+        component_label,
+        type,
+        state_gain,
+        federal_gain,
+        diff
+      ) %>%
+  
+       group_by(component_label, type) %>% 
+  
+    summarise(
+    state_gain   = sum(state_gain,  na.rm = TRUE),
+    federal_gain = sum(federal_gain, na.rm = TRUE),
+    total_gain = sum(diff, na.rm=TRUE),
+    .groups = "drop"
+) %>% 
+
+      dplyr::rename(
+        Component     = component_label,
+        Type          = type,
+        `State Gain`  = state_gain,
+        `Federal Gain`= federal_gain,
+        `Total Gain`  = total_gain
+      ) %>%
+  
+      dplyr::arrange(dplyr::desc(Type)) %>% 
+  nice_table() %>% 
+  
+    kableExtra::pack_rows(index=idx)
+
+  # ---------- Payments by component & government ----------
+res$payment_by_component_government %>%
+      dplyr::select(
+        component_label,
+        type,
+        period,
+        state_payment,
+        federal_payment
+      ) %>%
+     group_by(component_label, type, period) %>% 
+  
+    summarise(
+    state_payment   = sum(state_payment,   na.rm = TRUE),
+    federal_payment = sum(federal_payment, na.rm = TRUE),
+    .groups = "drop"
+) %>% 
+
+  pivot_longer(cols=c("state_payment", "federal_payment"), values_to = "dollar", names_to = "gov_type") %>% 
+  
+  pivot_wider(id_cols = c(component_label, type, gov_type), values_from = "dollar", names_from = "period") %>% 
+  
+mutate(    gov_type = case_when(
+      gov_type == "state_payment" ~ "state",
+      gov_type == "federal_payment" ~ "federal")) %>% 
+  
+      dplyr::mutate(
+      gain= dplyr::case_when(
+        type == "benefit" ~ pre - post,  # benefits shrink → savings
+        type == "tax"     ~ post - pre,  # taxes rise     → revenue
+        TRUE              ~ NA_real_
+      )
+      ) %>% 
+  
+        dplyr::arrange(dplyr::desc(type)) %>% 
+  
+        dplyr::rename(
+        Component     = component_label,
+        Type          = type,
+       `Government Type` = gov_type, 
+       `Post` = post,
+       `Pre` = pre,
+        `Total Gain`  = gain
+      ) %>%
+  
+    nice_table() %>% 
+  
+    kableExtra::pack_rows(index=idx)
+
+payment_by_component_gov %>% 
+
+  
+  pivot_longer(cols=c(state_payment_total, federal_payment_total), values_to = "dollar", names_to = "gov_type")  %>% 
+    mutate(    gov_type = case_when(
+      gov_type == "state_payment_total" ~ "state",
+      gov_type == "federal_payment_total" ~ "federal"),
+      
+      type = case_when(
+        type == "benefit" ~ "Benefit Spending",
+        type == "tax" ~ "Tax Revenue"
+      )) %>% 
+
+    mutate(
+    type = factor(type, levels = c("Tax Revenue", "Benefit Spending"))
+  ) %>%
+  arrange(type, component_label) %>% 
+  mutate(
+    component_label = factor(component_label, levels = unique(component_label))
+  ) %>% 
+    group_by(component_label, type, period, gov_type) %>% 
+  
+    summarise(
+    dollar  = sum(dollar,  na.rm = TRUE),
+    .groups = "drop"
+) %>%
+  
+  ggplot(
+  aes(
+    x = component_label,          # <— categories on Y
+    y = dollar/1e6,        # <— values on X (horizontal bars)
+    fill = period
+  )
+) +
+geom_col(position = "dodge", width = 0.4) +
+  facet_wrap(.~gov_type) +
+   theme_minimal() +
+  coord_flip()+
+  theme(
+    legend.position = "bottom",
+        strip.text.y = element_text(angle = 0),
+      strip.background = element_rect(
+    fill = "#d9eae8",        # background color
+    color = "#d9eae8",        # border color
+    linewidth = 0.8
+  )
+  ) +
+  labs(x=NULL,
+       y="Dollar (millions)") 
+
+res$delta_by_component %>%
+      dplyr::select(
+        component_label,
+        type,
+        state_gain,
+        federal_gain,
+        diff
+      ) %>%
+  
+       group_by(component_label, type) %>% 
+  
+    summarise(
+    state_gain   = sum(state_gain,  na.rm = TRUE),
+    federal_gain = sum(federal_gain, na.rm = TRUE),
+    total_gain = sum(diff, na.rm=TRUE),
+    .groups = "drop"
+) %>% 
+  
+   
+  pivot_longer(cols=c(state_gain, federal_gain), values_to = "dollar", names_to = "gov_type")  %>% 
+    mutate(    gov_type = case_when(
+      gov_type == "state_gain" ~ "state",
+      gov_type == "federal_gain" ~ "federal"),
+      
+      type = case_when(
+        type == "benefit" ~ "Benefit Spending",
+        type == "tax" ~ "Tax Revenue"
+      )) %>% 
+  
+  mutate(
+    positive = ifelse(dollar>=0, 1, 0)
+  ) %>% 
+   ggplot(aes(
+    x    = component_label,
+    y    = dollar / 1e6,          # now matches y-axis label
+    fill = as.factor(positive)
+  )) +
+  geom_col(width = 0.4) +
+  facet_wrap(~ gov_type) +
+  coord_flip() +
+  theme_minimal() +
+  theme(
+    legend.position = "bottom",
+    strip.text.y    = element_text(angle = 0),
+    strip.background = element_rect(
+      fill      = "#d9eae8",
+      color     = "#d9eae8",
+      linewidth = 0.8
+    )
+  ) +
+  labs(
+    x   = NULL,
+    y   = "Dollar (millions)",
+  )+scale_fill_manual(
+    values = c(
+      `0` = "#E54060",  # negative (loss)
+      `1`= "#0073A2"   # positive (gain)
+    )
+  ) 
+```
+
+```{r}
+
+   
+OI_COLORS <- c(
+  "#29B6A4", "#FAA523", "#003A4F", "#7F4892", "#A4CE4E",
+  "#2B8F43", "#0073A2", "#E54060", "#FFD400", "#6BBD45"
+)
+
+```
+
+# 2. by component
+
+funding components by government types
+
+```{r}
+
+res$delta_by_government
+
+res$delta_by_component
+
+res$delta_by_component %>% 
+  pivot_longer(col=c(pre, post), values_to = "dollar", names_to = "period") %>% 
+  
+  ggplot(aes(x=component_label, y=dollar, fill=period)) +
+  geom_bar(stat = "identity",
+         position = position_dodge()) +
+  coord_flip() +
+  theme_minimal()
+
+res$payment_by_component_government
+  
+  pivot_longer(col=c(state_payment, federal_payment), values_to = "dollar", names_to = "type_government") %>% 
+  
+    ggplot(aes(x=component_label, y=dollar, fill=period)) +
+  geom_bar(stat = "identity",
+         position = position_dodge()) +
+  coord_flip() +
+  facet_wrap(~type_government,)+
+  theme_minimal()
+
+res$delta_by_component %>% 
+  
+    pivot_longer(col=c(pre, post), values_to = "dollar", names_to = "period") %>% 
+    
+    mutate(state_payment = dollar*state_share,
+           federal_payment = dollar*federal_share) %>% 
+  
+  group_by(component, component_label, period) %>% 
+
+  summarize(
+    state_payment = sum(state_payment),
+    federal_payment = sum(federal_payment)
+  ) 
+
+delta_by_component_government <- res$delta_by_component %>% 
+    
+    pivot_longer(col=c(pre, post), values_to = "dollar", names_to = "period") %>% 
+    
+    mutate(state_payment = dollar*state_share,
+           federal_payment = dollar*federal_share) %>% 
+    
+    group_by(component, component_label, period) %>% 
+    
+    summarize(
+      state_payment = sum(state_payment),
+      federal_payment = sum(federal_payment),
+      .groups = "drop"
+    ) 
+  
+
+ delta_by_component_government %>% 
+    
+    group_by(period) %>% 
+    summarize(
+      state_payment_total = sum(state_payment),
+      federal_payment_total = sum(federal_payment),
+      .groups = "drop"
+    ) 
+  
+  
+```
+
+# funding shares
+
+Later we want to expand this to all the states
+
+```{r}
+
+## 1) Medicaid FMAP – Utah FY 2024
+## MACPAC / CRS tables imply Utah's regular FMAP is 65.90% in FY 2024
+FMAP_UT_2024 <- 0.6590   # federal share of traditional Medicaid service costs
+
+## 2) CCDF matching rate – Utah FFY 2024
+## ACF “FFY 2023 and FFY 2024 CCDF State Matching Rates” lists Utah’s match ≈ 0.6840
+CCDF_MATCH_UT_2024 <- 0.6840   # federal share for CCDF matching funds
+
+## 3) TANF – effective state vs federal shares
+## Utah TANF note: $75.4m federal TANF block grant, ~$24.9m required state MOE.:contentReference[oaicite:0]{index=0}
+TANF_FED_UT  <- 75.4   # millions, federal TANF grant
+TANF_MOE_UT  <- 24.9   # millions, state MOE
+
+TANF_STATE_SHARE_UT   <- TANF_MOE_UT / (TANF_FED_UT + TANF_MOE_UT)   # ≈ 0.248
+TANF_FEDERAL_SHARE_UT <- TANF_FED_UT  / (TANF_FED_UT + TANF_MOE_UT)  # ≈ 0.752
+
+funding_shares <- tribble(
+  ~component,      ~state_share,                 ~federal_share,
+
+  # Mixed programs (Utah-specific splits)
+  "medicaid_adult",    1 - FMAP_UT_2024,             FMAP_UT_2024,        # ≈ 34.1% state / 65.9% federal
+  "medicaid_child",    1 - FMAP_UT_2024,             FMAP_UT_2024,        # ≈ 34.1% state / 65.9% federal
+  "snap",        0.00,                         1.00,                # benefits treated as fully federal
+  "aca",         0.00,                         1.00,                # ACA PTCs are federal
+  "ccdf",        1 - CCDF_MATCH_UT_2024,       CCDF_MATCH_UT_2024,  # ≈ 31.6% state / 68.4% federal
+  "wic",         0.00,                         1.00,                # WIC benefits fully federal
+
+  # Credits/taxes that are purely federal or purely state
+  "eitc_fed",    0.00,                         1.00,
+  "eitc_state",  1.00,                         0.00,
+  "ctc_fed",     0.00,                         1.00,
+  "ctc_state",   1.00,                         0.00,
+  "tax_income_fed",     0.00,                         1.00,
+  "tax_income_state",   1.00,                         0.00,
+
+  # TANF – effective split based on UT’s TANF grant + MOE
+  "tanf",        TANF_STATE_SHARE_UT,          TANF_FEDERAL_SHARE_UT
+)
+
+
+```
+
+# full dataset version
+
+```{r}
+
+yu_pre <- read_csv("output/results_fake_yearup_1000_pre.csv")
+yu_post <- read_csv("output/results_fake_yearup_1000_post.csv")
+
+head(yu_pre)
+
+
+long_raw <- bind_rows(
+  pre=yu_pre,
+  post=yu_post,
+  .id="period"
+) %>%
+  select(
+    id,
+    period,
+    income,
+    # major benefits we care about
+    value.snap,
+    value.tanf,
+    value.medicaid.adult,
+    value.medicaid.child,
+    value.aca,
+    value.CCDF,
+    value.wic,
+    # federal/state tax credits
+    value.eitc.fed, value.eitc.state,
+    value.ctc.fed,  value.ctc.state,
+    # taxes
+    tax.income.fed, tax.income.state
+  ) %>%  
+
+  pivot_longer(
+    cols=-c(id, period), names_to = "component", values_to = "dollar"
+  ) %>% 
+  
+  mutate(
+    component = str_remove(component, "^value\\."),
+    component = str_replace_all(component, "\\.", "_"), 
+    component = tolower(component),
+    
+    type = case_when(
+      component %in% c(
+        "tax_income_fed", "tax_income_state"
+      ) ~ "tax",
+      TRUE ~ "benefit"
+    )
+  )
+
+# delta <- long_raw %>% 
+#   
+#   filter(component != "income") %>% 
+#   
+#     pivot_wider(
+#     id_cols = c(id, component, type), values_from = dollar, names_from = period
+#   ) %>% 
+#   
+#   mutate(
+#     
+#     diff = case_when(
+#       # Benefits + refundable credits: positive if they go DOWN
+#       type ==  "benefit" ~ pre - post,
+#       # Taxes: positive if they go UP
+#       type == "tax" ~ post - pre,
+#       TRUE ~ NA_real_
+#     )) %>% 
+#   
+#   left_join(funding_shares, by=c("component")) %>% 
+#   
+#   mutate(
+#     state_gain = diff * state_share,
+#     federal_gain = diff * federal_share
+#   )
+# 
+# 
+# delta_by_gov <- delta %>% 
+#   summarize(
+#     state_gain_sum = sum(state_gain),
+#     federal_gain_sum = sum(federal_gain)
+#   )
+# 
+
+
+delta_by_component <- long_raw %>% 
+  
+  group_by(period, component, type) %>% 
+  
+  summarize(
+    dollar=sum(dollar, na.rm=TRUE)
+  ) %>% 
+  
+  ungroup() %>% 
+  
+  pivot_wider(id_cols = c(component, type), values_from = dollar, names_from = period) %>% 
+  
+  
+  mutate(
+    
+    diff = case_when(
+      # Benefits + refundable credits: positive if they go DOWN
+      type ==  "benefit" ~ pre - post,
+      # Taxes: positive if they go UP
+      type == "tax" ~ post - pre,
+      TRUE ~ NA_real_
+    )) %>% 
+  
+  left_join(funding_shares, by=c("component")) %>% 
+  
+  mutate(
+    state_gain = diff * state_share,
+    federal_gain = diff * federal_share
+  )
+  
+
+delta_by_government <- delta_by_component %>% 
+  summarize(
+    state_gain_sum = sum(state_gain, na.rm=TRUE),
+    federal_gain_sum = sum(federal_gain, na.rm=TRUE)
+  )
+
+delta_by_government
+```
+
+# single version
+
+```{r}
+
+ut_single_parent <- read_csv("output/results_UT_single.csv")
+
+avg_pre  <- 18000   # replace with your actual average pre
+avg_te <- 7000
+avg_post <- avg_pre + avg_te  # replace with your actual average post
+
+
+# Find the nearest simulated income points
+pre_row <- ut_single_parent %>%  slice_min(abs(income-avg_pre), n=1)
+post_row <- ut_single_parent %>%  slice_min(abs(income-avg_post), n=1)
+
+colnames(pre_row)
+
+
+long_raw <- bind_rows(
+  pre=pre_row,
+  post=post_row,
+  .id="period"
+) %>%
+  select(
+    period,
+    income,
+    # major benefits we care about
+    value.snap,
+    value.tanf,
+    value.medicaid.adult,
+    value.medicaid.child,
+    value.aca,
+    value.CCDF,
+    value.wic,
+    # federal/state tax credits
+    value.eitc.fed, value.eitc.state,
+    value.ctc.fed,  value.ctc.state,
+    # taxes
+    tax.income.fed, tax.income.state
+  )  %>% 
+  
+  pivot_longer(
+    cols=-period, names_to = "component", values_to = "dollar"
+  ) %>% 
+  
+  mutate(
+    component = str_remove(component, "^value\\."),
+    component = str_replace_all(component, "\\.", "_"), 
+    component = tolower(component),
+    
+    type = case_when(
+      component %in% c(
+        "tax_income_fed", "tax_income_state"
+      ) ~ "tax",
+      TRUE ~ "benefit"
+    )
+  ) 
+
+delta <- long_raw %>% 
+  
+  filter(component != "income") %>% 
+  
+    pivot_wider(
+    id_cols = c(component, type), values_from = dollar, names_from = period
+  ) %>% 
+  
+  mutate(
+    
+    diff = case_when(
+      # Benefits + refundable credits: positive if they go DOWN
+      type ==  "benefit" ~ pre - post,
+      # Taxes: positive if they go UP
+      type == "tax" ~ post - pre,
+      TRUE ~ NA_real_
+    )) %>% 
+  
+  left_join(funding_shares, by=c("component")) %>% 
+  
+  mutate(
+    state_gain = diff * state_share,
+    federal_gain = diff * federal_share
+  )
+
+
+delta_by_gov <- delta %>% 
+  summarize(
+    state_gain_sum = sum(state_gain),
+    federal_gain_sum = sum(federal_gain)
+  )
+
+delta_by_gov
+```
+
+```{r}
+
+plot_data <- long_raw %>% 
+  filter(component != "income") %>% 
+  mutate(
+    period = factor(period, levels = c("pre", "post")),
+    type   = if_else(component %in% c("tax_income_fed", "tax_income_state"),
+                     "tax", "benefit"),
+    # set an explicit order for x-axis
+    component = factor(
+      component,
+      levels = c(
+        "snap", "tanf",
+        "medicaid_adult", "medicaid_child",
+        "aca", "ccdf", "wic",
+        "eitc_fed", "eitc_state",
+        "ctc_fed", "ctc_state",
+        "tax_income_fed", "tax_income_state"
+      )
+    )
+  )
+
+bg <- plot_data %>%
+  distinct(component, type) %>%
+  arrange(component) %>%
+  mutate(x = as.numeric(component)) %>%
+  group_by(type) %>%
+  summarise(
+    xmin = min(x) - 0.5,
+    xmax = max(x) + 0.5,
+    .groups = "drop"
+  )
+
+ggplot() +
+  # background rectangles by type
+  geom_rect(
+    data = bg,
+    aes(
+      xmin = xmin, xmax = xmax,
+      ymin = -Inf, ymax = Inf,
+      fill = type
+    ),
+    inherit.aes = FALSE,
+    alpha = 0.3,
+    color = NA
+  ) +
+  # pre/post bars on top
+  geom_bar(
+    data = plot_data,
+    aes(x = component, y = dollar, fill = period),
+    stat     = "identity",
+    position = position_dodge(width = 0.6),
+    width    = 0.6
+  ) +
+  coord_flip() +
+  theme_minimal() +
+  theme(
+    axis.text.y = element_text(hjust = 1)
+  )
+
+```
+
+# fiscal change by gov level
+
+# component-level bar chart

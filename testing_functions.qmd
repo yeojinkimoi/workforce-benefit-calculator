@@ -1,0 +1,66 @@
+---
+title: "testing_functions"
+format: html
+editor: visual
+---
+
+function.
+
+- createData
+- InitialTransformations
+
+
+BenefitsCalculator.ALICEExpense: calculates the baseline cost of living budget for each household using ALICE parameters (childcare, food, housing, healthcare, transportation, etc.).
+
+“Given this family’s size, ages, county, tenure, etc., what are their necessary expenses for childcare, food, housing, healthcare, transportation, tech, etc., under ALICE?”
+
+```{r}
+
+# Function to create data from dataframe
+function.createData.from.DF <- function(data, ruleYear) {
+  
+  # 1. Add ruleYear and Year (data year)
+  data <- data %>%
+    mutate(
+      ruleYear = ruleYear,
+      Year     = ruleYear
+    )
+  
+  # 2. Split locations:
+  #    "Salt Lake County, UT" -> countyortownName + stateAbbrev
+    data <- data %>%
+      separate(
+        col    = locations,
+        into   = c("countyortownName", "stateAbbrev"),
+        sep    = ", "
+      )
+  
+  # 3. Income lag for tax credits 
+    data <- data %>%
+      mutate(income_tm12 = income)
+  
+  # 4. Core PRD transforms (joins, numkids/numadults, income1–income6, etc.)
+  data <- function.InitialTransformations(data)
+  
+  # 5. Filing status and uninsured flag
+  data <- data %>%
+    mutate(
+      FilingStatus = case_when(
+        married == 0 & numkids == 0 ~ 1L,  # Single
+        married == 1                ~ 2L,  # Married filing jointly
+        married == 0 & numkids > 0  ~ 3L,  # Head of household
+        TRUE                        ~ 1L
+      ),
+      uninsured = case_when(
+        empl_healthcare == 0 ~ 1L,
+        empl_healthcare == 1 ~ 0L,
+        TRUE                 ~ 0L
+      )
+    )
+  
+  return(data)
+}
+
+
+```
+

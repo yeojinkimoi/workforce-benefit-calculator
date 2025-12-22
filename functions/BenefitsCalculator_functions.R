@@ -253,6 +253,7 @@ BenefitsCalculator.ALICEExpenses<-function(data){
 
   ## MISCALLENEOUS (OTHER) EXPENSE ----
   # This is calculated at the end 10% of all budget items (Food,housing,Health Care,Transportation,Tech,Child care)
+  
   data$exp.misc<- round(.1 * rowMaxs(cbind((data$ALICE.expense.healthcare.family+
                                 data$exp.utilities+
                                 data$exp.rentormortgage+
@@ -260,7 +261,6 @@ BenefitsCalculator.ALICEExpenses<-function(data){
                                 data$exp.food+
                                 data$exp.transportation+
                                 data$exp.childcare), na.rm=TRUE)),0)
-
 
   return(data)
 

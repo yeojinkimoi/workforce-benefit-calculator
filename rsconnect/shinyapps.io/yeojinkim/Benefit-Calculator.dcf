@@ -1,0 +1,13 @@
+name: Benefit-Calculator
+title: Benefit-Calculator
+username: yeojinkim
+account: yeojinkim
+server: shinyapps.io
+hostUrl: https://api.shinyapps.io/v1
+appId: 16335355
+bundleId: 11357271
+url: https://yeojinkim.shinyapps.io/Benefit-Calculator/
+version: 1
+asMultiple: FALSE
+asStatic: FALSE
+ignoredFiles: .github/workflows/test.yml|.here|applyBenefitsCalculator.R|CITATION.cff|data/fake_yearup_1000.csv|data/fake_yearup_1000_post.csv|data/fake_yearup_1000_pre.csv|fake_yu_data_generator.R|LICENSE|PRD Technical Manual - 07-12-2024.pdf|projects/TEST.yml|projects/UT_single.yml|PSL_catalog.json|README.md|testing.qmd|testing_functions.qmd|UpdateGitHub.R

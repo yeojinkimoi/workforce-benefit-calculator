@@ -4,7 +4,6 @@
 
 # PREAMBLE----
 
-
 rm(list=ls())
 
 ## Setting your working directory----
@@ -34,13 +33,17 @@ source(paste0(current_directory,"/functions/TANF.R"), local=TRUE) # TANF code
 source(paste0(current_directory,"/functions/CCDF.R"), local=TRUE) # CCDF code
 
 # SPECIFY PROJECT----
-PROJECT<-"TEST"
+PROJECT<-"UT_single"
+DATA_NAME <- "fake_yearup_1000_"
 
 ## 1. Settings----
 
 # Load inputs YAML file
 inputs <- read_yaml(paste0(current_directory,"/projects/",PROJECT,".yml"))
+# df_pre <- read_csv(file.path("data", paste0(DATA_NAME, "pre", ".csv")))
+#df_post <- read_csv(file.path("data", paste0(DATA_NAME, "post", ".csv")))
 
+####### testing
 
 # Global settings
 k_ftorpt <- inputs$k_ftorpt 
@@ -78,9 +81,9 @@ APPLY_TANF<-inputs$APPLY_TANF
 APPLY_SSI<-inputs$APPLY_SSI 
 APPLY_SSDI<-inputs$APPLY_SSDI
 
-
 ## 2. Create data from inputs----
 data<-function.createData(inputs)
+# data <- function.createData.from.DF(df_pre, 2024)
 
 ## 3. Attach default expenses----
 data<-BenefitsCalculator.ALICEExpenses(data)
@@ -119,11 +122,13 @@ data2<-data %>%
          , value.CCDF, value.HeadStart, value.PreK
          , value.cdctc.fed, value.cdctc.state, value.ctc.fed, value.ctc.state, value.eitc.fed, value.eitc.state
          , value.eitc, value.ctc, value.cdctc, value.ssdi, value.ssi, value.tanf
+         , value.wic # adding new values here
          , AfterTaxIncome, NetResources, tax.income.fed, tax.income.state) %>%
   
   relocate(value.ctc.state, value.ctc.fed, value.eitc.state, value.eitc.fed, tax.income.state, tax.income.fed)
 
 
-# write.csv(data2, file = paste0(current_directory,"/output/results_",PROJECT, ".csv"), row.names = FALSE)
+write.csv(data2, file = paste0(current_directory,"/output/results_", DATA_NAME, "pre", ".csv"), row.names = FALSE)
+#write.csv(data2, file = paste0(current_directory,"/output/results_", DATA_NAME, "post", ".csv"), row.names = FALSE)
 
 

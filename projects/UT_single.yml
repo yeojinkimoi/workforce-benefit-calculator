@@ -1,0 +1,133 @@
+##########################################################################
+# Inputs for Data Generation (leave blank if the data was pre-generated)
+##########################################################################
+
+# Policy rule year(s) and data year (use 2024 for now)
+ruleYear: [2024]
+Year: [2024]
+
+# Family: single parent (age 25) with one young child (age 2)
+agePerson1: [25]   # adult
+agePerson2: [NA]    # child
+agePerson3: [NA]
+agePerson4: [NA]
+agePerson5: [NA]
+agePerson6: [NA]
+agePerson7: [NA]
+agePerson8: [NA]
+agePerson9: [NA]
+agePerson10: [NA]
+agePerson11: [NA]
+agePerson12: [NA]
+
+# Marital status (0: not married; 1: married)
+married: [0]
+
+# Disability status (0 = no disability for everyone in v1)
+disability1: [0]
+disability2: [0]
+disability3: [0]
+disability4: [0]
+disability5: [0]
+disability6: [0]
+disability7: [0]
+disability8: [0]
+disability9: [0]
+disability10: [0]
+disability11: [0]
+disability12: [0]
+
+# Prior SSI receipt (affects Medicaid pathways)
+prev_ssi: [0] 
+
+# Blindness flags (0 = not blind)
+blind1: [0]
+blind2: [0]
+blind3: [0]
+blind4: [0]
+blind5: [0]
+blind6: [0]
+
+# SSDI PIA (set to 0 for workforce-age non-SSDI recipients)
+ssdiPIA1: [0]
+ssdiPIA2: [0]
+ssdiPIA3: [0]
+ssdiPIA4: [0]
+ssdiPIA5: [0]
+ssdiPIA6: [0]
+
+# Location: choose a specific Utah county instead of "all"
+# PRD uses "County, ST" format (similar to "Fulton County, GA")
+locations: ['Salt Lake County, UT']
+
+# Earnings range: simulate from 0 to 100k by 1k to see the full earnings ladder
+income_start: 0
+income_end: 100000
+income_increase_by: 1000
+
+# Income from other sources (zero for now)
+income.investment: [0]
+income.gift: [0]
+income.child_support: [0]
+
+# Employer-sponsored health insurance (0 = no access; you can flip to 1 later)
+empl_healthcare: [0]
+
+# Housing tenure: "own" or "rent"
+ownorrent: ['rent']
+
+# Assets (set low for typical low-income workforce participants)
+assets.cash: [0]
+assets.car1: [0]
+
+# Other work-related disability expenses
+disab.work.exp: [0]
+
+#####################################
+# Benefits Calculator Settings
+#####################################
+
+# Global settings
+k_ftorpt: FT              # not critical for now
+schoolagesummercare: PT   # leave as PT (ben calc expects this)
+headstart_ftorpt: PT
+preK_ftorpt: PT
+contelig.headstart: false
+contelig.earlyheadstart: false
+contelig.ccdf: false
+
+# Use ALICE survival budget for default expenses (recommended for CLIFF-style work)
+USEALICE: true
+budget.ALICE: survivalforcliff
+
+# Transfer programs switches
+# Turn ON big-ticket programs relevant to workforce participants and state/federal budgets
+
+APPLY_CHILDCARE: true     # enable childcare block (uses CCDF etc.)
+APPLY_HEADSTART: false
+APPLY_CCDF: true          # childcare subsidies (large spending for families with kids)
+APPLY_PREK: false
+
+APPLY_LIHEAP: false       # smaller; can turn on later
+APPLY_HEALTHCARE: true
+APPLY_MEDICAID_ADULT: true
+APPLY_MEDICAID_CHILD: true
+APPLY_ACA: true           # Marketplace subsidies when income exceeds Medicaid thresholds
+
+APPLY_SECTION8: false     # housing is big but complex; add later if needed
+APPLY_RAP: false
+APPLY_FRSP: false
+
+APPLY_SNAP: true          # major federal program, important for cliffs
+APPLY_SLP: false
+APPLY_WIC: true           # smaller but relevant for low-income parents with young kids
+
+APPLY_EITC: true          # federal + any state EITC
+APPLY_TAXES: true         # income & payroll taxes
+APPLY_CTC: true           # child tax credit
+APPLY_CDCTC: true         # child & dependent care credit
+APPLY_FATES: false
+
+APPLY_TANF: true          # cash assistance; important fiscally and for cliffs
+APPLY_SSI: false          # rare for typical workforce participants; can add later
+APPLY_SSDI: false
