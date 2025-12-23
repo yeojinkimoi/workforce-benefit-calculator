@@ -6,21 +6,31 @@ build_simple_df_for_prd <- function(state_abbrev,
                                     county_name,
                                     avg_pre,
                                     avg_age,
-                                    n_participants = 1L) {
-  # For the fiscal math, it’s enough to run *one* representative person
-  # and then scale by N later. So here we just build a 1-row DF.
+                                    hh_scenario = c("single", "single_parent_1kid", "two_parent_1kid"),
+                                    child_age = 4L,
+                                    spouse_age = 25L) {
+  
+  hh_scenario <- match.arg(hh_scenario)
+  
+  # Scenario -> household structure
+  married <- if (hh_scenario == "two_parent_1kid") 1L else 0L
+  numkids <- if (hh_scenario == "single") 0L else 1L
+  
+  # Put spouse in agePerson2, child in agePerson3 (keeps your existing schema intact)
+  agePerson1 <- as.integer(avg_age)
+  agePerson2 <- if (married == 1L) as.integer(spouse_age) else NA_integer_
+  agePerson3 <- if (numkids == 1L) as.integer(child_age)  else NA_integer_
   
   tibble::tibble(
     id        = 1L,
     locations = paste0(county_name, ", ", state_abbrev),
     
-    # Family structure: single, no kids
-    married   = 0L,
-    numkids   = 0L,
+    married   = married,
+    numkids   = numkids,
     
-    agePerson1  = as.integer(avg_age),
-    agePerson2  = NA_integer_,
-    agePerson3  = NA_integer_,
+    agePerson1  = agePerson1,
+    agePerson2  = agePerson2,
+    agePerson3  = agePerson3,
     agePerson4  = NA_integer_,
     agePerson5  = NA_integer_,
     agePerson6  = NA_integer_,
@@ -63,7 +73,7 @@ build_simple_df_for_prd <- function(state_abbrev,
     # Employer health insurance – start with 0 (no coverage)
     empl_healthcare = 0L,
     
-    # Earnings – THIS is your pre-program income
+    # Earnings – pre-program income
     income = avg_pre,
     
     # Other income sources
@@ -82,7 +92,6 @@ build_simple_df_for_prd <- function(state_abbrev,
 }
 
 
-
 #-----------------------------------------
 # Compute state/federal gains for avg TE – SIMPLE MODE
 #-----------------------------------------
@@ -93,15 +102,21 @@ compute_fiscal_effect_simple <- function(state_abbrev,
                                          avg_age,
                                          n_participants,
                                          ruleYear       = 2024,
-                                         funding_shares) {
+                                         funding_shares,
+                                         hh_scenario    = "single",
+                                         child_age      = 4L,
+                                         spouse_age     = 25L) {
   
-  # 1) Build a 1-row DF for “representative person”
   df_pre_one <- build_simple_df_for_prd(
     state_abbrev = state_abbrev,
     county_name  = county_name,
     avg_pre      = avg_pre,
-    avg_age      = avg_age
+    avg_age      = avg_age,
+    hh_scenario  = hh_scenario,
+    child_age    = child_age,
+    spouse_age   = spouse_age
   )
+  
   
   # 2) Use dataset-based pipeline for that DF
   res_one <- compute_fiscal_effect_df(

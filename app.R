@@ -283,6 +283,26 @@ ui <- fluidPage(
         condition = "input.mode == 'simple'",
         textInput("state_simple", "State abbreviation", value = "UT"),
         textInput("county_simple", "County name", value = "Salt Lake County"),
+        selectInput(
+          "hh_scenario_simple",
+          "Household scenario",
+          choices = c(
+            "1) Single (no kids)"        = "single",
+            "2) One parent + one child"  = "single_parent_1kid",
+            "3) Two parents + one child" = "two_parent_1kid"
+          ),
+          selected = "single"
+        ),
+        
+        conditionalPanel(
+          condition = "input.hh_scenario_simple != 'single'",
+          numericInput("child_age_simple", "Child age", value = 4, min = 0, max = 17)
+        ),
+        
+        conditionalPanel(
+          condition = "input.hh_scenario_simple == 'two_parent_1kid'",
+          numericInput("spouse_age_simple", "Spouse age", value = 25, min = 16, max = 80)
+        ),
         numericInput("avg_pre_simple", "Average pre-program earnings", value = 18000, min = 0),
         numericInput("avg_te_simple", "Average treatment effect on earnings", value = 7000, min = 0),
         numericInput("avg_age_simple", "Average age", value = 25, min = 16, max = 80),
@@ -459,7 +479,14 @@ server <- function(input, output, session) {
           avg_age        = input$avg_age_simple,
           n_participants = input$n_participants_simple,
           ruleYear       = input$rule_year_simple,
-          funding_shares = funding_shares
+          funding_shares = funding_shares,
+          
+          # NEW:
+          hh_scenario    = input$hh_scenario_simple,
+          child_age      = if (input$hh_scenario_simple == "single") NA_integer_
+          else as.integer(input$child_age_simple),
+          spouse_age     = if (input$hh_scenario_simple == "two_parent_1kid") as.integer(input$spouse_age_simple)
+          else NA_integer_
         )
         
       } else {

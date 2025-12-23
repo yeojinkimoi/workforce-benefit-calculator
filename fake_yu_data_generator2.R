@@ -6,35 +6,73 @@ set.seed(123)
 
 n <- 1000
 
+# Targets from Year Up PACE Exhibit 3-2 (All Participants)
+# Age: 18–20 (42.8%), 21–24 (57.2%)
+# Living arrangements:
+#   - Not living w spouse/partner or children: 86.6
+#   - Not living w spouse/partner, living w children: 6.5
+#   - Living w spouse/partner, not living w children: 4.5
+#   - Living w spouse/partner and children: 2.4
+# Family income last year bins:
+#   - <15k: 37.1, 15–30k: 25.7, 30k+: 37.2
+# Mean family income: 27,021
+
 # ------------------------------------------------------------
-# 1) Demographics with realistic correlations
+# 1) Age distribution (match Exhibit 3-2)
 # ------------------------------------------------------------
-
-# Adult age: centered early 20s, truncated [18, 29]
-agePerson1 <- round(rnorm(n, mean = 23, sd = 3))
-agePerson1 <- pmin(pmax(agePerson1, 18), 29)
-
-# Probability of having a child increases with age a bit
-p_child <- plogis(-3.0 + 0.18 * (agePerson1 - 22))
-has_child <- rbinom(n, size = 1, prob = p_child)
-
-# Marriage probability depends on child status + age
-p_married <- plogis(-3.2 + 1.6 * has_child + 0.15 * (agePerson1 - 22))
-married <- rbinom(n, size = 1, prob = p_married)
-
-# If has_child == 1, assign a child age (0–10) with more weight on younger kids; else NA
-child_ages <- 0:10
-child_wts  <- rev(seq_along(child_ages))
-agePerson2 <- rep(NA_integer_, n)
-agePerson2[has_child == 1] <- sample(
-  child_ages,
-  size = sum(has_child == 1),
+age_group <- sample(
+  c("18_20", "21_24"),
+  size = n,
   replace = TRUE,
-  prob = child_wts
+  prob = c(0.428, 0.572)
 )
 
+agePerson1 <- ifelse(
+  age_group == "18_20",
+  sample(18:20, size = n, replace = TRUE),
+  sample(21:24, size = n, replace = TRUE)
+)
+
+# ------------------------------------------------------------
+# 2) Living arrangements (match Exhibit 3-2)
+# ------------------------------------------------------------
+living_arr <- sample(
+  c("no_spouse_no_kids", "no_spouse_with_kids", "spouse_no_kids", "spouse_with_kids"),
+  size = n,
+  replace = TRUE,
+  prob = c(0.866, 0.065, 0.045, 0.024)
+)
+
+has_spouse <- living_arr %in% c("spouse_no_kids", "spouse_with_kids")
+has_child  <- living_arr %in% c("no_spouse_with_kids", "spouse_with_kids")
+
+# PRD "married" is a proxy for living with spouse/partner
+married <- as.integer(has_spouse)
+
+# ------------------------------------------------------------
+# 3) Fill household ages into PRD slots
+# ------------------------------------------------------------
+spouse_age_draw <- function(a) as.integer(pmin(pmax(a + round(rnorm(1, 0, 2)), 18), 35))
+
+# Child age not given -> impute (skew young)
+child_ages <- 0:10
+child_wts  <- rev(seq_along(child_ages))
+
+agePerson2 <- rep(NA_integer_, n)
+agePerson3 <- rep(NA_integer_, n)
+
+# spouse present -> agePerson2 is spouse
+idx_spouse <- which(has_spouse)
+agePerson2[idx_spouse] <- vapply(agePerson1[idx_spouse], spouse_age_draw, integer(1))
+
+# child present:
+idx_child_only <- which(has_child & !has_spouse)
+idx_child_both <- which(has_child & has_spouse)
+
+agePerson2[idx_child_only] <- sample(child_ages, length(idx_child_only), replace = TRUE, prob = child_wts)
+agePerson3[idx_child_both] <- sample(child_ages, length(idx_child_both), replace = TRUE, prob = child_wts)
+
 # Everyone else NA (keep schema stable for PRD)
-agePerson3  <- NA_integer_
 agePerson4  <- NA_integer_
 agePerson5  <- NA_integer_
 agePerson6  <- NA_integer_
@@ -46,26 +84,58 @@ agePerson11 <- NA_integer_
 agePerson12 <- NA_integer_
 
 # ------------------------------------------------------------
-# 2) Income model with realistic correlations
-#    - higher with age
-#    - higher if married
-#    - higher if has child (proxy for household contribution/support)
+# 4) Income distribution (match Exhibit 3-2 bins; more realistic within bins)
+#    - <15k and 15-30k: truncated normal (peaked, not uniform)
+#    - 30k+: truncated lognormal (right-skew)
 # ------------------------------------------------------------
 
-mu_log <- log(14000) +
-  0.04 * (agePerson1 - 23) +
-  0.12 * married +
-  0.10 * has_child
+# Simple truncated-normal sampler (base R only)
+rtruncnorm_simple <- function(n, mean, sd, lo, hi) {
+  out <- numeric(0)
+  while (length(out) < n) {
+    x <- rnorm(n, mean, sd)
+    x <- x[x >= lo & x <= hi]
+    out <- c(out, x)
+  }
+  out[1:n]
+}
 
-sigma_log <- 0.35
-income <- round(rlnorm(n, meanlog = mu_log, sdlog = sigma_log))
-income <- pmax(income, 0)
-income <- pmin(income, 80000)  # optional cap to avoid extreme tails
+inc_bin <- sample(
+  c("lt15k", "15to30k", "ge30k"),
+  size = n,
+  replace = TRUE,
+  prob = c(0.371, 0.257, 0.372)
+)
+
+income <- numeric(n)
+
+# <15k: centered around ~9k with spread, truncated to [0, 15000]
+n1 <- sum(inc_bin == "lt15k")
+income[inc_bin == "lt15k"] <- rtruncnorm_simple(
+  n1, mean = 9000, sd = 4000, lo = 0, hi = 15000
+)
+
+# 15-30k: centered around ~22k, truncated to [15000, 30000]
+n2 <- sum(inc_bin == "15to30k")
+income[inc_bin == "15to30k"] <- rtruncnorm_simple(
+  n2, mean = 22000, sd = 3500, lo = 15000, hi = 30000
+)
+
+# 30k+: truncated lognormal (right-skew), tuned for overall mean ~27,021
+draw_ge30k <- function(m = 49500, sdlog = 0.55, lo = 30000, hi = 200000) {
+  mu <- log(m) - 0.5 * sdlog^2
+  x <- rlnorm(1, meanlog = mu, sdlog = sdlog)
+  while (x < lo || x > hi) x <- rlnorm(1, meanlog = mu, sdlog = sdlog)
+  x
+}
+idx_ge30 <- which(inc_bin == "ge30k")
+income[idx_ge30] <- vapply(seq_along(idx_ge30), function(i) draw_ge30k(), numeric(1))
+
+income <- round(income)
 
 # ------------------------------------------------------------
-# 3) Build the fake YearUp dataset in PRD style
+# 5) Build the fake YearUp dataset in PRD style
 # ------------------------------------------------------------
-
 fake_yearup <- tibble(
   id        = 1:n,
   income    = income,
@@ -75,7 +145,11 @@ fake_yearup <- tibble(
   agePerson1, agePerson2, agePerson3, agePerson4, agePerson5, agePerson6,
   agePerson7, agePerson8, agePerson9, agePerson10, agePerson11, agePerson12,
   
-  married = as.integer(married),
+  married = married,
+  
+  # keep for diagnostics (drop if PRD doesn't want them)
+  living_arr = living_arr,
+  inc_bin    = inc_bin,
   
   # disability / blindness / SSI flags: all zero for now
   disability1 = 0L, disability2 = 0L, disability3 = 0L, disability4 = 0L,
@@ -105,16 +179,27 @@ fake_yearup <- tibble(
   disab.work.exp = 0
 )
 
-# Sanity checks
+# ------------------------------------------------------------
+# 6) Sanity checks vs report targets
+# ------------------------------------------------------------
 fake_yearup %>%
   summarize(
-    mean_income = mean(income),
-    mean_age    = mean(agePerson1),
-    share_child = mean(!is.na(agePerson2)),
-    share_married = mean(married == 1),
-    married_given_child = mean(married[!is.na(agePerson2)] == 1),
-    married_given_nochild = mean(married[is.na(agePerson2)] == 1)
+    share_18_20 = mean(agePerson1 %in% 18:20),
+    share_21_24 = mean(agePerson1 %in% 21:24),
+    
+    share_no_spouse_no_kids    = mean(living_arr == "no_spouse_no_kids"),
+    share_no_spouse_with_kids  = mean(living_arr == "no_spouse_with_kids"),
+    share_spouse_no_kids       = mean(living_arr == "spouse_no_kids"),
+    share_spouse_with_kids     = mean(living_arr == "spouse_with_kids"),
+    
+    share_lt15k   = mean(inc_bin == "lt15k"),
+    share_15to30k = mean(inc_bin == "15to30k"),
+    share_ge30k   = mean(inc_bin == "ge30k"),
+    mean_income   = mean(income),
+    
+    share_child_any  = mean(!is.na(agePerson3) | (!is.na(agePerson2) & !has_spouse)),
+    share_spouse_any = mean(married == 1)
   )
 
 dir.create("data", showWarnings = FALSE)
-write.csv(fake_yearup, file.path("data", "fake_yearup_1000_v2.csv"), row.names = FALSE)
+write.csv(fake_yearup, file.path("data", "fake_yearup_1000_pace_like.csv"), row.names = FALSE)
