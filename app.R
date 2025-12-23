@@ -457,9 +457,11 @@ server <- function(input, output, session) {
     state_use  <- UT_STATE
     county_use <- if (LOCK_COUNTY) UT_COUNTY else input$county_simple
     
-    res_full <- if (input$mode == "simple") {
+    if (input$mode == "simple") {
       
-      compute_fiscal_effect_simple(
+      avg_pre_income <- input$avg_pre_simple
+      
+      res_full <- compute_fiscal_effect_simple(
         state_abbrev   = state_use,
         county_name    = county_use,
         avg_pre        = input$avg_pre_simple,
@@ -473,12 +475,16 @@ server <- function(input, output, session) {
         spouse_age     = if (input$hh_scenario_simple == "two_parent_1kid") as.integer(input$spouse_age_simple) else NA_integer_
       )
       
+      avg_te_use <- input$avg_te_simple
+      
     } else {
       
       req(input$data_file)
       df_pre <- readr::read_csv(input$data_file$datapath, show_col_types = FALSE)
       
-      out <- compute_fiscal_effect_df(
+      avg_pre_income <- mean(df_pre$income, na.rm = TRUE)
+      
+      res_full <- compute_fiscal_effect_df(
         df_pre         = df_pre,
         avg_te         = input$avg_te_dataset,
         ruleYear       = input$rule_year_dataset,
@@ -486,15 +492,15 @@ server <- function(input, output, session) {
         funding_shares = funding_shares
       )
       
+      avg_te_use <- input$avg_te_dataset
+      
       rm(df_pre); gc()
-      out
     }
-    
-    avg_te_use <- if (input$mode == "simple") input$avg_te_simple else input$avg_te_dataset
     
     res_keep <- list(
       n_participants                  = res_full$n_participants,
       avg_te                          = avg_te_use,
+      avg_pre_income                  = avg_pre_income,   # <-- ADD THIS
       delta_by_government             = res_full$delta_by_government,
       delta_by_component              = res_full$delta_by_component,
       payment_by_component_government = res_full$payment_by_component_government
@@ -725,15 +731,8 @@ server <- function(input, output, session) {
       if (length(v) == 0) 0 else v[[1]]
     }
     
-    # IMPORTANT: these must match whatever your PRD outputs.
-    # If your periods are named differently, change these two strings.
     pre_label  <- "pre"
     post_label <- "post"
-    
-    state_pre  <- get_val(pay_tax, pre_label,  state_total)
-    state_post <- get_val(pay_tax, post_label, state_total)
-    fed_pre    <- get_val(pay_tax, pre_label,  fed_total)
-    fed_post   <- get_val(pay_tax, post_label, fed_total)
     
     validate(need(
       any(pay_tax$period == pre_label) && any(pay_tax$period == post_label),
@@ -741,13 +740,34 @@ server <- function(input, output, session) {
              paste(unique(pay_tax$period), collapse = ", "))
     ))
     
-    tax_gain_raw <- c(
-      fed_post - fed_pre,
-      state_post - state_pre,
-      (fed_post - fed_pre) + (state_post - state_pre)
-    )
+    state_pre  <- get_val(pay_tax, pre_label,  state_total)
+    state_post <- get_val(pay_tax, post_label, state_total)
+    fed_pre    <- get_val(pay_tax, pre_label,  fed_total)
+    fed_post   <- get_val(pay_tax, post_label, fed_total)
     
-    scale_mode <- input$scale_tax %||% "pp"   # safe default if NULL
+    # Totals income base (consistent with the totals taxes above)
+    avg_pre_income <- res$avg_pre_income
+    validate(need(is.finite(avg_pre_income) && avg_pre_income >= 0, "avg_pre_income missing/invalid."))
+    
+    y_pre_total  <- avg_pre_income * N
+    y_post_total <- (avg_pre_income + avg_te) * N
+    
+    safe_div <- function(a, b) ifelse(is.finite(b) && b > 0, a / b, 0)
+    
+    # Average tax rates (pre/post)
+    r_state_pre  <- safe_div(state_pre,  y_pre_total)
+    r_state_post <- safe_div(state_post, y_post_total)
+    r_fed_pre    <- safe_div(fed_pre,    y_pre_total)
+    r_fed_post   <- safe_div(fed_post,   y_post_total)
+    
+    # Incremental tax change (remove "re-rating" of baseline income)
+    d_state_incr <- (state_post - state_pre) - y_pre_total * (r_state_post - r_state_pre)
+    d_fed_incr   <- (fed_post   - fed_pre)   - y_pre_total * (r_fed_post   - r_fed_pre)
+    d_total_incr <- d_fed_incr + d_state_incr
+    
+    tax_gain_raw <- c(d_fed_incr, d_state_incr, d_total_incr)
+    
+    scale_mode <- input$scale_tax %||% "pp"
     earnings_change <- if (scale_mode == "pp") avg_te else avg_te * N
     tax_gain <- if (scale_mode == "pp") tax_gain_raw / N else tax_gain_raw
     amtr <- tax_gain / earnings_change
@@ -759,6 +779,7 @@ server <- function(input, output, session) {
       `Avg marginal tax rate` = scales::percent(amtr, accuracy = 0.1)
     )
   })
+  
   
   
   output$plot_overall_gov_type <- renderPlot({
