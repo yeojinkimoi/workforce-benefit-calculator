@@ -33,6 +33,21 @@ source(file.path(current_directory, "functions_oi/nice_table_functions.R"), loca
 source(file.path(current_directory, "functions_oi/run_prd_for_df_functions.R"), local = TRUE)     # compute_fiscal_effect_df()
 source(file.path(current_directory, "functions_oi/run_prd_for_input_functions.R"), local = TRUE)  # compute_fiscal_effect_simple()
 
+# ----------------- PRD: LOAD ONCE AT STARTUP (NO SHRINKING) -----------------
+prd_env <- new.env(parent = emptyenv())
+
+load(file.path(current_directory, "prd_parameters/expenses.rdata"),            envir = prd_env)
+load(file.path(current_directory, "prd_parameters/benefit.parameters.rdata"),  envir = prd_env)
+load(file.path(current_directory, "prd_parameters/tables.rdata"),              envir = prd_env)
+load(file.path(current_directory, "prd_parameters/parameters.defaults.rdata"), envir = prd_env)
+
+# If PRD functions expect these objects to be on the search path:
+attach(prd_env, name = "PRD_PARAMS", warn.conflicts = FALSE)
+
+onStop(function() {
+  try(detach("PRD_PARAMS"), silent = TRUE)
+})
+
 # ----------------- YAML SWITCHES (UT single parent) -----------------
 PROJECT <- "UT_single_parent"
 inputs  <- read_yaml(file.path(current_directory, "projects", paste0(PROJECT, ".yaml")))
@@ -100,17 +115,6 @@ funding_shares <- tibble::tribble(
     countyortownName = "Salt Lake County"
   )
 
-# ----------------- PRD MEMORY HELPERS -----------------
-
-load_prd_env <- function(current_directory) {
-  prd_env <- new.env(parent = emptyenv())
-  load(file.path(current_directory, "prd_parameters/expenses.rdata"),            envir = prd_env)
-  load(file.path(current_directory, "prd_parameters/benefit.parameters.rdata"),  envir = prd_env)
-  load(file.path(current_directory, "prd_parameters/tables.rdata"),              envir = prd_env)
-  load(file.path(current_directory, "prd_parameters/parameters.defaults.rdata"), envir = prd_env)
-  prd_env
-}
-
 # Best-effort shrink: filter any PRD data.frames that key on geography
 
 # Best-effort shrink: filter any PRD data.frames that key on geography
@@ -159,18 +163,6 @@ alias_suffix_objects <- function(env, suffix = "_UT") {
     assign(nm_generic, get(nm_ut, envir = env), envir = env)
   }
   invisible(env)
-}
-
-
-with_prd_attached <- function(prd_env, expr) {
-  attach(prd_env, name = "PRD_PARAMS", warn.conflicts = FALSE)
-  on.exit({
-    try(detach("PRD_PARAMS"), silent = TRUE)
-    rm(prd_env)
-    gc()
-  }, add = TRUE)
-  
-  force(expr)
 }
 
 # ----------------- UI -----------------
@@ -366,6 +358,10 @@ ui <- fluidPage(
             tableOutput("tax_payments_table"),
             br(),
             
+            h3("Average marginal tax rate (tax gain ÷ earnings change)"),
+            tableOutput("amtr_table"),
+            br(),
+            
             h3("Payments by government and source (pre vs post)"),
             radioButtons(
               "plot_scale", label = NULL,
@@ -458,68 +454,57 @@ server <- function(input, output, session) {
   
   results <- eventReactive(input$run, {
     
-    prd_env <- load_prd_env(current_directory)
+    state_use  <- UT_STATE
+    county_use <- if (LOCK_COUNTY) UT_COUNTY else input$county_simple
     
-    # shrink PRD env
-    if (LOCK_COUNTY) shrink_prd_env_to_geo(prd_env, UT_STATE, UT_COUNTY)
-    else            shrink_prd_env_to_geo(prd_env, UT_STATE, NULL)
-    
-    with_prd_attached(prd_env, {
+    res_full <- if (input$mode == "simple") {
       
-      state_use  <- UT_STATE
-      county_use <- if (LOCK_COUNTY) UT_COUNTY else input$county_simple
-      
-      res_full <- if (input$mode == "simple") {
-        
-        compute_fiscal_effect_simple(
-          state_abbrev   = state_use,
-          county_name    = county_use,
-          avg_pre        = input$avg_pre_simple,
-          avg_te         = input$avg_te_simple,
-          avg_age        = input$avg_age_simple,
-          n_participants = input$n_participants_simple,
-          ruleYear       = input$rule_year_simple,
-          funding_shares = funding_shares,
-          
-          # NEW:
-          hh_scenario    = input$hh_scenario_simple,
-          child_age      = if (input$hh_scenario_simple == "single") NA_integer_
-          else as.integer(input$child_age_simple),
-          spouse_age     = if (input$hh_scenario_simple == "two_parent_1kid") as.integer(input$spouse_age_simple)
-          else NA_integer_
-        )
-        
-      } else {
-        
-        req(input$data_file)
-        
-        df_pre <- readr::read_csv(input$data_file$datapath, show_col_types = FALSE)
-        
-        
-        out <- compute_fiscal_effect_df(
-          df_pre         = df_pre,
-          avg_te         = input$avg_te_dataset,
-          ruleYear       = input$rule_year_dataset,
-          data_name      = NULL,
-          funding_shares = funding_shares
-        )
-        
-        rm(df_pre); gc()
-        out
-      }
-      
-      # keep only UI outputs
-      res_keep <- list(
-        n_participants                  = res_full$n_participants,
-        delta_by_government             = res_full$delta_by_government,
-        delta_by_component              = res_full$delta_by_component,
-        payment_by_component_government = res_full$payment_by_component_government
+      compute_fiscal_effect_simple(
+        state_abbrev   = state_use,
+        county_name    = county_use,
+        avg_pre        = input$avg_pre_simple,
+        avg_te         = input$avg_te_simple,
+        avg_age        = input$avg_age_simple,
+        n_participants = input$n_participants_simple,
+        ruleYear       = input$rule_year_simple,
+        funding_shares = funding_shares,
+        hh_scenario    = input$hh_scenario_simple,
+        child_age      = if (input$hh_scenario_simple == "single") NA_integer_ else as.integer(input$child_age_simple),
+        spouse_age     = if (input$hh_scenario_simple == "two_parent_1kid") as.integer(input$spouse_age_simple) else NA_integer_
       )
       
-      rm(res_full); gc()
-      res_keep
-    })
+    } else {
+      
+      req(input$data_file)
+      df_pre <- readr::read_csv(input$data_file$datapath, show_col_types = FALSE)
+      
+      out <- compute_fiscal_effect_df(
+        df_pre         = df_pre,
+        avg_te         = input$avg_te_dataset,
+        ruleYear       = input$rule_year_dataset,
+        data_name      = NULL,
+        funding_shares = funding_shares
+      )
+      
+      rm(df_pre); gc()
+      out
+    }
+    
+    avg_te_use <- if (input$mode == "simple") input$avg_te_simple else input$avg_te_dataset
+    
+    res_keep <- list(
+      n_participants                  = res_full$n_participants,
+      avg_te                          = avg_te_use,
+      delta_by_government             = res_full$delta_by_government,
+      delta_by_component              = res_full$delta_by_component,
+      payment_by_component_government = res_full$payment_by_component_government
+    )
+    
+    rm(res_full); gc()
+    res_keep
   })
+  
+
   
   # ---------------- TAB: ASSUMPTION ----------------
   output$funding_shares_used <- renderTable({
@@ -718,6 +703,63 @@ server <- function(input, output, session) {
     
     out
   })
+  
+  output$amtr_table <- renderTable({
+    req(results())
+    res <- results()
+    N <- res$n_participants
+    avg_te <- res$avg_te
+    validate(need(is.finite(avg_te) && avg_te > 0, "avg_te must be > 0 to compute AMTR."))
+    
+    pay_tax <- res$payment_by_component_government %>%
+      filter(type == "tax") %>%
+      group_by(period) %>%
+      summarise(
+        state_total = sum(state_payment_total, na.rm = TRUE),
+        fed_total   = sum(federal_payment_total, na.rm = TRUE),
+        .groups = "drop"
+      )
+    
+    get_val <- function(df, p, col) {
+      v <- df %>% filter(period == p) %>% pull({{ col }})
+      if (length(v) == 0) 0 else v[[1]]
+    }
+    
+    # IMPORTANT: these must match whatever your PRD outputs.
+    # If your periods are named differently, change these two strings.
+    pre_label  <- "pre"
+    post_label <- "post"
+    
+    state_pre  <- get_val(pay_tax, pre_label,  state_total)
+    state_post <- get_val(pay_tax, post_label, state_total)
+    fed_pre    <- get_val(pay_tax, pre_label,  fed_total)
+    fed_post   <- get_val(pay_tax, post_label, fed_total)
+    
+    validate(need(
+      any(pay_tax$period == pre_label) && any(pay_tax$period == post_label),
+      paste0("AMTR needs periods '", pre_label, "' and '", post_label, "'. Found: ",
+             paste(unique(pay_tax$period), collapse = ", "))
+    ))
+    
+    tax_gain_raw <- c(
+      fed_post - fed_pre,
+      state_post - state_pre,
+      (fed_post - fed_pre) + (state_post - state_pre)
+    )
+    
+    scale_mode <- input$scale_tax %||% "pp"   # safe default if NULL
+    earnings_change <- if (scale_mode == "pp") avg_te else avg_te * N
+    tax_gain <- if (scale_mode == "pp") tax_gain_raw / N else tax_gain_raw
+    amtr <- tax_gain / earnings_change
+    
+    tibble::tibble(
+      Government = c("Federal", "State", "Total"),
+      `Tax gain` = scales::dollar(tax_gain, accuracy = 1),
+      `Earnings change` = scales::dollar(earnings_change, accuracy = 1),
+      `Avg marginal tax rate` = scales::percent(amtr, accuracy = 0.1)
+    )
+  })
+  
   
   output$plot_overall_gov_type <- renderPlot({
     req(results())
