@@ -718,22 +718,21 @@ server <- function(input, output, session) {
     validate(need(is.finite(avg_te) && avg_te > 0, "avg_te must be > 0 to compute AMTR."))
     
     pay_tax <- res$payment_by_component_government %>%
-      filter(type == "tax") %>%
-      group_by(period) %>%
-      summarise(
+      dplyr::filter(type == "tax") %>%
+      dplyr::group_by(period) %>%
+      dplyr::summarise(
         state_total = sum(state_payment_total, na.rm = TRUE),
         fed_total   = sum(federal_payment_total, na.rm = TRUE),
         .groups = "drop"
       )
     
     get_val <- function(df, p, col) {
-      v <- df %>% filter(period == p) %>% pull({{ col }})
+      v <- df %>% dplyr::filter(period == p) %>% dplyr::pull({{ col }})
       if (length(v) == 0) 0 else v[[1]]
     }
     
     pre_label  <- "pre"
     post_label <- "post"
-    
     validate(need(
       any(pay_tax$period == pre_label) && any(pay_tax$period == post_label),
       paste0("AMTR needs periods '", pre_label, "' and '", post_label, "'. Found: ",
@@ -745,27 +744,11 @@ server <- function(input, output, session) {
     fed_pre    <- get_val(pay_tax, pre_label,  fed_total)
     fed_post   <- get_val(pay_tax, post_label, fed_total)
     
-    # Totals income base (consistent with the totals taxes above)
-    avg_pre_income <- res$avg_pre_income
-    validate(need(is.finite(avg_pre_income) && avg_pre_income >= 0, "avg_pre_income missing/invalid."))
-    
-    y_pre_total  <- avg_pre_income * N
-    y_post_total <- (avg_pre_income + avg_te) * N
-    
-    safe_div <- function(a, b) ifelse(is.finite(b) && b > 0, a / b, 0)
-    
-    # Average tax rates (pre/post)
-    r_state_pre  <- safe_div(state_pre,  y_pre_total)
-    r_state_post <- safe_div(state_post, y_post_total)
-    r_fed_pre    <- safe_div(fed_pre,    y_pre_total)
-    r_fed_post   <- safe_div(fed_post,   y_post_total)
-    
-    # Incremental tax change (remove "re-rating" of baseline income)
-    d_state_incr <- (state_post - state_pre) - y_pre_total * (r_state_post - r_state_pre)
-    d_fed_incr   <- (fed_post   - fed_pre)   - y_pre_total * (r_fed_post   - r_fed_pre)
-    d_total_incr <- d_fed_incr + d_state_incr
-    
-    tax_gain_raw <- c(d_fed_incr, d_state_incr, d_total_incr)
+    # ✅ Correct for a liability-style model: raw change post - pre
+    d_state <- state_post - state_pre
+    d_fed   <- fed_post   - fed_pre
+    d_total <- d_fed + d_state
+    tax_gain_raw <- c(d_fed, d_state, d_total)
     
     scale_mode <- input$scale_tax %||% "pp"
     earnings_change <- if (scale_mode == "pp") avg_te else avg_te * N
@@ -779,6 +762,7 @@ server <- function(input, output, session) {
       `Avg marginal tax rate` = scales::percent(amtr, accuracy = 0.1)
     )
   })
+  
   
   
   
