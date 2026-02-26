@@ -1,0 +1,14 @@
+----------------------------------------------------------------------
+Date:       2026-02-26
+Parameter:  UT_Phaseout in stateinctaxData (all UT rows, all rule years)
+Old value:  1.3
+New value:  0.013
+File:       benefit.parameters.rdata
+Source:     Utah State Tax Commission; Tax Foundation 2024 state tax data
+Why:        100x error. Utah taxpayer credit phases out at 1.3% per dollar
+            above threshold, not 130%. Caused the credit ($876 single / $1752
+            MFJ) to vanish over ~$674 instead of ~$67k. Created artificial
+            58.7% marginal state tax spike at ~$18k. Detected via AMTR
+            validation sweep showing amtr_state jumping 0.25 -> 0.587.
+----------------------------------------------------------------------
+

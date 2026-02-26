@@ -1,0 +1,5 @@
+policy-rules-database/
+.Rproj.user
+.claude/
+.Rhistory
+*.csv
