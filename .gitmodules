@@ -1,0 +1,3 @@
+[submodule "policy-rules-database"]
+	path = policy-rules-database
+	url = https://github.com/Research-Division/policy-rules-database.git
