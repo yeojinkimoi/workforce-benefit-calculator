@@ -223,6 +223,70 @@ Run `code/export_parameters_to_csv.R` in RStudio to export all data frames to `v
 - **Upstream compatibility:** This repo was cloned from the Atlanta Fed PRD. Architecture should stay flexible to incorporate upstream rule updates when PRD parameters change.
 - **Funding shares are state-level, not county-level.** The join in `compute_fiscal_effect_df()` is by `(component, stateAbbrev)` only. Do not add county to the funding shares schema.
 
+## Updating the Policy Rules Database
+
+The `policy-rules-database/` directory is a git submodule pointing to our fork (`yeojinkimoi/policy-rules-database`, branch `fix-parameters`). The Atlanta Fed upstream is `Research-Division/policy-rules-database`. When upstream releases updated parameters or rules, follow this workflow to incorporate them.
+
+### Git remotes (inside the submodule)
+- `origin` → `yeojinkimoi/policy-rules-database.git` (our fork)
+- `upstream` → `Research-Division/policy-rules-database.git` (Atlanta Fed)
+
+### Step-by-step workflow
+
+**1. Fetch & merge upstream into the submodule**
+```bash
+cd policy-rules-database
+git fetch upstream
+git merge upstream/main      # or the relevant upstream branch
+```
+Resolve any merge conflicts. The most likely conflicts are in `.rdata` parameter files or PRD function code.
+
+**2. Re-apply local parameter fixes**
+Upstream `.rdata` files may overwrite our corrections (e.g., `UT_Phaseout`). Re-run the cumulative fix script:
+```r
+source("code/fix_parameter.R")
+```
+
+**3. Re-export CSVs for inspection**
+```r
+source("code/export_parameters_to_csv.R")
+```
+This updates `validation/csv_parameters/` so you can diff against the previous export.
+
+**4. Re-run validation**
+```r
+source("code/validate_parameters.R")
+run_all_validations("UT")
+# Repeat for any other validated states
+```
+
+**5. Verify plots**
+Check `validation/plots/` for anomalies — especially AMTR curves and benefit phase-out shapes. Compare against pre-update plots to catch regressions.
+
+**6. Commit & push the submodule**
+```bash
+cd policy-rules-database
+git add -A
+git commit -m "Merge upstream PRD updates and re-apply local fixes"
+git push origin fix-parameters
+```
+
+**7. Update the main repo's submodule pointer**
+```bash
+cd ..   # back to workforce-benefit-calculator root
+git add policy-rules-database
+git commit -m "Update PRD submodule to latest upstream + fixes"
+git push
+```
+
+**8. Deploy**
+Posit Connect picks up the new commit automatically. If not, redeploy manually from the Posit Connect dashboard.
+
+### Notes
+- Always re-run `fix_parameter.R` after any upstream merge — fixes are cumulative and idempotent.
+- If upstream introduces new programs or parameters, consider whether they need new entries in `fundingSharesData` and new component mappings (see "How to Add a New Component" below).
+- Keep the fork's `fix-parameters` branch as the single integration branch. Do not merge directly into `main` on the fork.
+
 ## Components Currently Tracked
 
 Benefits: SNAP, TANF, Medicaid (adult & child), ACA, CCDF, WIC

@@ -8,7 +8,7 @@
 library(dplyr)
 
 # Load tables.rdata to get all state abbreviations
-load("prd_parameters/tables.rdata")
+load("policy-rules-database/prd_parameters/tables.rdata")
 all_states <- sort(unique(table.countypop$stateAbbrev))
 rule_years <- c(2024L)
 
@@ -89,7 +89,7 @@ fundingSharesData <- full_grid %>%
 # ---------------------------------------------------------------------------
 # Save
 # ---------------------------------------------------------------------------
-save(fundingSharesData, file = "prd_parameters/funding.shares.rdata")
+save(fundingSharesData, file = "policy-rules-database/prd_parameters/funding.shares.rdata")
 
 cat("Created prd_parameters/funding.shares.rdata\n")
 cat(sprintf("  %d states × %d components × %d years = %d rows\n",
